@@ -1,5 +1,6 @@
 """The tests for generic camera component."""
 import asyncio
+from http import HTTPStatus
 from os import path
 from unittest.mock import patch
 
@@ -9,11 +10,7 @@ import respx
 from homeassistant import config as hass_config
 from homeassistant.components.generic import DOMAIN
 from homeassistant.components.websocket_api.const import TYPE_RESULT
-from homeassistant.const import (
-    HTTP_INTERNAL_SERVER_ERROR,
-    HTTP_NOT_FOUND,
-    SERVICE_RELOAD,
-)
+from homeassistant.const import SERVICE_RELOAD
 from homeassistant.setup import async_setup_component
 
 
@@ -112,7 +109,7 @@ async def test_limit_refetch(hass, hass_client):
     respx.get("http://example.com/5a").respond(text="hello world")
     respx.get("http://example.com/10a").respond(text="hello world")
     respx.get("http://example.com/15a").respond(text="hello planet")
-    respx.get("http://example.com/20a").respond(status_code=HTTP_NOT_FOUND)
+    respx.get("http://example.com/20a").respond(status_code=HTTPStatus.NOT_FOUND)
 
     await async_setup_component(
         hass,
@@ -137,7 +134,7 @@ async def test_limit_refetch(hass, hass_client):
     with patch("async_timeout.timeout", side_effect=asyncio.TimeoutError()):
         resp = await client.get("/api/camera_proxy/camera.config_test")
         assert respx.calls.call_count == 0
-        assert resp.status == HTTP_INTERNAL_SERVER_ERROR
+        assert resp.status == HTTPStatus.INTERNAL_SERVER_ERROR
 
     hass.states.async_set("sensor.temp", "10")
 

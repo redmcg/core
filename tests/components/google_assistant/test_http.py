@@ -1,5 +1,6 @@
 """Test Google http services."""
 from datetime import datetime, timedelta, timezone
+from http import HTTPStatus
 from unittest.mock import ANY, patch
 
 from homeassistant.components.google_assistant import GOOGLE_ASSISTANT_SCHEMA
@@ -129,7 +130,7 @@ async def test_call_homegraph_api_retry(hass, aioclient_mock, hass_storage):
     ) as mock_get_token:
         mock_get_token.return_value = MOCK_TOKEN
 
-        aioclient_mock.post(MOCK_URL, status=401, json={})
+        aioclient_mock.post(MOCK_URL, status=HTTPStatus.UNAUTHORIZED, json={})
 
         await config.async_call_homegraph_api(MOCK_URL, MOCK_JSON)
 

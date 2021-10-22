@@ -1,4 +1,6 @@
 """The tests for the Home Assistant HTTP component."""
+from http import HTTPStatus
+
 # pylint: disable=protected-access
 from ipaddress import ip_address
 import os
@@ -19,7 +21,6 @@ from homeassistant.components.http.ban import (
     setup_bans,
 )
 from homeassistant.components.http.view import request_handler_factory
-from homeassistant.const import HTTP_FORBIDDEN
 from homeassistant.setup import async_setup_component
 
 from . import mock_real_ip
@@ -65,14 +66,16 @@ async def test_access_from_banned_ip(hass, aiohttp_client):
     for remote_addr in BANNED_IPS:
         set_real_ip(remote_addr)
         resp = await client.get("/")
-        assert resp.status == HTTP_FORBIDDEN
+        assert resp.status == HTTPStatus.FORBIDDEN
 
 
 @pytest.mark.parametrize(
     "remote_addr, bans, status",
     list(
         zip(
-            BANNED_IPS_WITH_SUPERVISOR, [1, 1, 0], [HTTP_FORBIDDEN, HTTP_FORBIDDEN, 401]
+            BANNED_IPS_WITH_SUPERVISOR,
+            [1, 1, 0],
+            [HTTPStatus.FORBIDDEN, HTTPStatus.FORBIDDEN, HTTPStatus.UNAUTHORIZED],
         )
     ),
 )
@@ -167,7 +170,7 @@ async def test_ip_bans_file_creation(hass, aiohttp_client):
         )
 
         resp = await client.get("/")
-        assert resp.status == HTTP_FORBIDDEN
+        assert resp.status == HTTPStatus.FORBIDDEN
         assert m_open.call_count == 1
 
         assert (
