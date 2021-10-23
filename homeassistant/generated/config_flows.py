@@ -82,6 +82,7 @@ FLOWS = [
     "esphome",
     "ezviz",
     "faa_delays",
+    "fbee",
     "fireservicerota",
     "fjaraskupan",
     "flick_electric",
