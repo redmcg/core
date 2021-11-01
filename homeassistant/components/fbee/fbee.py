@@ -10,6 +10,10 @@ ALL_DEVICES_RESP=0x01
 SWITCH_STATUS=0x07
 ACK=0x29
 
+STATE_NO_CHANGE=0
+STATE_NEW_DEV=1
+STATE_NEW_STATE=2
+
 def fmt(v, l):
     v = hex(v)
     if len(v) > 2 and v[0:2] == "0x":
@@ -18,29 +22,44 @@ def fmt(v, l):
     return v[:l]
 
 class FBee():
-    def __init__(self, host, port, sn, device_callback = None):
-        self.connected = False
+    def __init__(self, host, port, sn, device_callbacks = []):
         self.host = host
         self.port = port
         self.sn = bytes.fromhex(sn[6:8] + sn[4:6] + sn[2:4] + sn[0:2])
         self.devices = {}
-        self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0)
-        self.s.settimeout(1)
-        self.device_callback = device_callback
+        self.device_callbacks = device_callbacks
+        self.m = threading.Lock()
+        self.s = None
         self.async_thread = None
 
+    def add_callback(self, callback):
+        self.device_callbacks += callback
+
     def connect(self):
-        if not self.connected:
-            self.connected = True
+        if self.s == None:
+            self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0)
+            self.s.settimeout(1)
             self.s.connect((self.host, self.port))
 
     def send_data(self, data):
         data = bytes.fromhex(data)
         b = self.sn + b"\xFE" + data
         l = (len(b) + 2).to_bytes(2, byteorder='little')
-        self.s.send(l + b)
+        self.m.acquire()
+        if self.s != None:
+            try:
+                self.s.send(l + b)
+            except OSError:
+                s.m.release()
+                raise NotConnected
+        else:
+           self.m.release()
+           raise NotConnected
+        self.m.release()
 
     def recv(self):
+        if self.s == None:
+            raise NotConnected
         b = self.s.recv(2)
         if len(b) == 2:
             resp = b[0]
@@ -56,15 +75,20 @@ class FBee():
                 key = hex(short) + hex(ep)
                 if key in self.devices:
                     device = self.devices[key]
+                    oldstate = device.get_state()
+                    oldname = device.get_name()
                     device.set_state(state)
                     device.set_name(name)
-                    newdev = False
+                    if oldstate == state and oldname == name:
+                        state = STATE_NO_CHANGE
+                    else:
+                        state = STATE_NEW_STATE
                 else:
                     device = self.devices[hex(short) + hex(ep)] = FBeeSwitch(self, name, short, ep, state)
-                    newdev = True
+                    state = STATE_NEW_DEV
 
-                if self.device_callback != None:
-                    self.device_callback(device, newdev)
+                for callback in self.device_callbacks:
+                    callback(device, state)
             elif resp == SWITCH_STATUS:
                 short=int.from_bytes(b[0:2], byteorder='little')
                 ep=b[2]
@@ -72,14 +96,18 @@ class FBee():
                 key = hex(short) + hex(ep)
                 if key in self.devices:
                     device = self.devices[key]
+                    oldstate = device.get_state()
                     self.devices[key].set_state(state)
-                    newdev = False
+                    if oldstate == state:
+                        state = STATE_NO_CHANGE
+                    else:
+                        state = STATE_NEW_STATE
                 else:
                     device = self.devices[key] = FBeeSwitch(self, "[Unknown] " + hex(short) + " " + hex(ep), short, ep, state)
-                    newdev = True
+                    state = STATE_NEW_DEV
 
-                if self.device_callback != None:
-                    self.device_callback(device, newdev)
+                for callback in self.device_callbacks:
+                    callback(device, state)
 
     def async_read(self, poll_interval):
         poll_interval = int(poll_interval)
@@ -89,13 +117,20 @@ class FBee():
             now = datetime.now()
             now = (now-datetime(1970,1,1)).total_seconds()
             if next_refresh <= now:
-                self.refresh_devices()
+                try:
+                    self.refresh_devices()
+                except NotConnected as e:
+                    break
                 next_refresh = now + poll_interval
+
             self.s.settimeout(next_refresh - now)
             try:
                 self.recv()
             except socket.timeout as e:
                 pass
+            except OSError as e:
+                break
+        self.async_thread = None
 
     def safe_recv(self):
         if self.async_thread != None:
@@ -132,12 +167,22 @@ class FBee():
         return self.devices[key]
 
     def start_async_read(self, poll_interval):
-        self.async_thread = threading.Thread(target=self.async_read, args=(poll_interval,))
-        self.async_thread.start()
+        if self.async_thread == None:
+            self.async_thread = threading.Thread(target=self.async_read, args=(poll_interval,))
+            self.async_thread.start()
         return self.async_thread
 
     def close(self):
-        self.s.close()
+        if self.s != None:
+            self.m.acquire()
+            try:
+                self.s.close()
+            except:
+                self.m.release()
+                raise
+            self.s = None
+            self.m.release()
+
 
 class FBeeSwitch():
     def __init__(self, fbee, name, short, ep, state):
@@ -156,6 +201,12 @@ class FBeeSwitch():
     def get_state(self):
         return self.state
 
+    def get_name(self):
+        return self.name
+
+    def get_key(self):
+        return hex(self.short) + hex(self.ep)
+
     def poll_state(self):
         self.fbee.poll_state(self.short, self.ep)
 
@@ -166,3 +217,6 @@ class FBeeSwitch():
             state = int(state, 16)
         self.fbee.send_data(SET_SWITCH_STATE + "0D02" + short[2:4] + short[0:2] + ("0" * 12) + ep + "0000" + fmt(state, 2))
         self.fbee.safe_recv()
+
+class NotConnected(Exception):
+    pass
